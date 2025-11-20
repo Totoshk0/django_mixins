@@ -1,9 +1,4 @@
 from django.db import models
-
-# Create your models here.
-
-from django.db import models
-
 from media.mixins import BorrowableMixin, DownloadableMixin
 
 
@@ -23,6 +18,18 @@ class MediaItem(models.Model):
         return f"MEDIA_{self.title[:5].upper()}"
 
 
+class Movie(DownloadableMixin, MediaItem):
+    duration = models.IntegerField()
+    format = models.CharField(max_length=10)
+
+    def get_description(self):  # полиморфизм
+        return f"Фильм '{self.title}' режиссера {self.creator}, {self.duration} мин."
+
+    def play_trailer(self):
+        return f"Воспроизведение трейлера фильма '{self.title}'"
+
+    def get_media_type(self):
+        return "movie"
 
 class Book(BorrowableMixin, MediaItem):
     isbn = models.CharField(max_length=20)
@@ -38,19 +45,6 @@ class Book(BorrowableMixin, MediaItem):
 
     def get_media_type(self):
         return "book"
-
-class Movie(DownloadableMixin, MediaItem):
-    duration = models.IntegerField()
-    format = models.CharField(max_length=10)
-
-    def get_description(self):  # полиморфизм
-        return f"Фильм '{self.title}' режиссера {self.creator}, {self.duration} мин."
-
-    def play_trailer(self):
-        return f"Воспроизведение трейлера фильма '{self.title}'"
-
-    def get_media_type(self):
-        return "movie"
 
 class AudioBook(DownloadableMixin, BorrowableMixin, MediaItem):
     duration = models.IntegerField()

@@ -1,10 +1,9 @@
-# views.py
 from django.http import JsonResponse
 from django.shortcuts import render, redirect
 from django.views.generic import ListView, DetailView, TemplateView
 
 from .forms import MediaForm
-from .models import Book, AudioBook
+from .models import Book, Movie, AudioBook
 from .services import MediaFactory
 
 
@@ -14,13 +13,15 @@ class MediaListView(ListView):
 
     def get_queryset(self):
         books = list(Book.objects.all())
+        movies = list(Movie.objects.all())
         audiobooks = list(AudioBook.objects.all())
-        return books + audiobooks
+        return books + movies + audiobooks
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         # Группируем по типам для отображения
         context['books'] = Book.objects.all()
+        context['movies'] = Movie.objects.all()
         context['audiobooks'] = AudioBook.objects.all()
         return context
 
@@ -31,14 +32,14 @@ class MediaDetailView(DetailView):
 
     def get_object(self):
         pk = self.kwargs.get('pk')
-        # Используем фабрику для определения типа медиа
-        for media_type in MediaFactory.get_all_media_types():
-            media_class = MediaFactory.get_media_class(media_type)
+        
+        # Автоматически определяем тип медиа, перебирая все модели
+        for model in [Book, Movie, AudioBook]:
             try:
-                return media_class.objects.get(pk=pk)
-            except media_class.DoesNotExist:
+                return model.objects.get(pk=pk)
+            except model.DoesNotExist:
                 continue
-        raise Book.DoesNotExist("Media item not found")
+        raise Http404("Media item not found")
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -63,7 +64,7 @@ class MediaDetailView(DetailView):
         if hasattr(media_item, 'play_trailer'):
             actions.append(('play_trailer', 'Смотреть трейлер', 'btn-warning'))
 
-        if hasattr(media_item, 'borrow') and not media_item.is_borrowed:
+        if hasattr(media_item, 'borrow') and not getattr(media_item, 'is_borrowed', False):
             actions.append(('borrow', 'Взять в аренду', 'btn-success'))
 
         if hasattr(media_item, 'download'):
@@ -74,6 +75,8 @@ class MediaDetailView(DetailView):
     def get_media_type(self, media_item):
         if isinstance(media_item, Book):
             return 'book'
+        elif isinstance(media_item, Movie):
+            return 'movie'
         elif isinstance(media_item, AudioBook):
             return 'audiobook'
         return 'unknown'
@@ -109,6 +112,11 @@ def media_action(request, media_type, item_id):
             'borrow': lambda obj: obj.borrow(request.user.username if request.user.is_authenticated else 'Гость'),
             'download': lambda obj: "Книги недоступны для скачивания",
         },
+        'movie': {
+            'describe': lambda obj: obj.get_description(),
+            'play_trailer': lambda obj: obj.play_trailer(),
+            'download': lambda obj: obj.download(),
+        },
         'audiobook': {
             'describe': lambda obj: obj.get_description(),
             'download': lambda obj: obj.download(),
@@ -139,31 +147,29 @@ def media_action(request, media_type, item_id):
         return JsonResponse({'error': 'Объект не найден'}, status=404)
 
 
-def borrow_media(request, pk):
-    # Используем фабрику для поиска объекта
-    for media_type in MediaFactory.get_all_media_types():
-        media_class = MediaFactory.get_media_class(media_type)
-        try:
-            item = media_class.objects.get(pk=pk)
-            if hasattr(item, 'borrow'):
-                result = item.borrow(request.user.username if request.user.is_authenticated else 'Гость')
-                return JsonResponse({'result': result})
-        except media_class.DoesNotExist:
-            continue
+def borrow_media(request, media_type, pk):
+    media_class = MediaFactory.get_media_class(media_type)
+    try:
+        item = media_class.objects.get(pk=pk)
+        if hasattr(item, 'borrow'):
+            result = item.borrow(request.user.username if request.user.is_authenticated else 'Гость')
+            return JsonResponse({'result': result})
+        else:
+            return JsonResponse({'error': 'Невозможно взять в аренду'}, status=400)
 
-    return JsonResponse({'error': 'Невозможно взять в аренду'}, status=400)
+    except media_class.DoesNotExist:
+        return JsonResponse({'error': 'Объект не найден'}, status=404)
 
 
-def download_media(request, pk):
+def download_media(request, media_type, pk):
+    media_class = MediaFactory.get_media_class(media_type)
+    try:
+        item = media_class.objects.get(pk=pk)
+        if hasattr(item, 'download'):
+            result = item.download()
+            return JsonResponse({'result': result})
+        else:
+            return JsonResponse({'error': 'Невозможно скачать'}, status=400)
 
-    for media_type in MediaFactory.get_all_media_types():
-        media_class = MediaFactory.get_media_class(media_type)
-        try:
-            item = media_class.objects.get(pk=pk)
-            if hasattr(item, 'download'):
-                result = item.download()
-                return JsonResponse({'result': result})
-        except media_class.DoesNotExist:
-            continue
-
-    return JsonResponse({'error': 'Невозможно скачать'}, status=400)
+    except media_class.DoesNotExist:
+        return JsonResponse({'error': 'Объект не найден'}, status=404)
